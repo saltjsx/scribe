@@ -1,26 +1,215 @@
 @import "tailwindcss";
 
-:root {
+:root,
+[data-theme="light"] {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #1d1d1f;
+  --sidebar-bg: rgba(246, 246, 246, 0.8);
+  --sidebar-border: rgba(0, 0, 0, 0.08);
+  --sidebar-hover: rgba(0, 0, 0, 0.04);
+  --sidebar-active: rgba(0, 122, 255, 0.12);
+  --accent: #007aff;
+  --muted: rgba(60, 60, 67, 0.6);
+  --secondary: rgba(60, 60, 67, 0.3);
+  --divider: rgba(60, 60, 67, 0.12);
+  --contribution-0: #e8eef4;
+  --contribution-1: #a8d1f0;
+  --contribution-2: #4a9ede;
+  --contribution-3: #1a5fa6;
+  --surface: #ffffff;
+  --subtle: rgba(0, 0, 0, 0.04);
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --background: #1c1c1e;
+  --foreground: #f5f5f7;
+  --sidebar-bg: rgba(28, 28, 30, 0.85);
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-hover: rgba(255, 255, 255, 0.06);
+  --sidebar-active: rgba(0, 122, 255, 0.2);
+  --accent: #0a84ff;
+  --muted: rgba(235, 235, 245, 0.6);
+  --secondary: rgba(235, 235, 245, 0.3);
+  --divider: rgba(235, 235, 245, 0.12);
+  --contribution-0: #2c2c2e;
+  --contribution-1: #1a4a6e;
+  --contribution-2: #2a7ab5;
+  --contribution-3: #4aa3e0;
+  --surface: #2c2c2e;
+  --subtle: rgba(255, 255, 255, 0.06);
+  color-scheme: dark;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --color-sidebar-bg: var(--sidebar-bg);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-accent: var(--accent);
+  --color-muted: var(--muted);
+  --color-secondary: var(--secondary);
+  --color-divider: var(--divider);
+  --color-surface: var(--surface);
+  --color-subtle: var(--subtle);
+  --font-sans: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-logo: var(--font-playfair);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "SF Pro Text", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "kern";
+}
+
+/* macOS sidebar chrome */
+.sidebar-chrome {
+  background: var(--sidebar-bg);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-right: 0.5px solid var(--divider);
+}
+
+.drag-region {
+  -webkit-app-region: drag;
+}
+
+.sidebar-item {
+  color: var(--foreground);
+  cursor: default;
+}
+
+.sidebar-item:hover {
+  background: var(--sidebar-hover);
+}
+
+.sidebar-item-active {
+  background: var(--sidebar-active);
+}
+
+.sidebar-item-active:hover {
+  background: var(--sidebar-active);
+}
+
+/* Scrollbar styling — macOS overlay style */
+.sidebar-chrome ::-webkit-scrollbar {
+  width: 6px;
+}
+.sidebar-chrome ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-chrome ::-webkit-scrollbar-thumb {
+  background: var(--divider);
+  border-radius: 3px;
+}
+.sidebar-chrome ::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Hide scrollbar utility */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* TipTap editor */
+.tiptap {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--foreground);
+}
+
+@media (max-width: 767px) {
+  .tiptap {
+    font-size: 16px; /* prevents iOS zoom on focus */
+  }
+}
+
+.tiptap:focus {
+  outline: none;
+}
+
+.tiptap p {
+  margin-bottom: 1.25em;
+}
+
+.tiptap p:last-child {
+  margin-bottom: 0;
+}
+
+.tiptap strong {
+  font-weight: 600;
+}
+
+.tiptap em {
+  font-style: italic;
+}
+
+.tiptap u {
+  text-decoration: underline;
+}
+
+.tiptap s {
+  text-decoration: line-through;
+}
+
+.tiptap ul,
+.tiptap ol {
+  padding-left: 1.5em !important;
+  margin-bottom: 1.25em !important;
+}
+
+.tiptap ul {
+  list-style-type: disc !important;
+}
+
+.tiptap ol {
+  list-style-type: decimal !important;
+}
+
+.tiptap li {
+  margin-bottom: 0.25em;
+  display: list-item !important;
+}
+
+.tiptap li p {
+  margin-bottom: 0;
+}
+
+.tiptap blockquote {
+  border-left: 3px solid var(--divider);
+  padding-left: 1em;
+  margin-left: 0;
+  margin-bottom: 1.25em;
+  color: var(--muted);
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--secondary);
+  pointer-events: none;
+  height: 0;
+}
+
+/* Skeleton loading */
+.skeleton {
+  background: linear-gradient(90deg, var(--subtle) 25%, var(--divider) 50%, var(--subtle) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+@keyframes skeleton-pulse {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
