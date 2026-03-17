@@ -37,24 +37,19 @@ export default function AppShellGate({
     router.replace(`/sign-in?redirect_url=${encodeURIComponent(redirectUrl)}`);
   }, [hasCheckedLocalUser, hasLocalAccess, isLoaded, isOffline, pathname, router]);
 
-  if (!hasCheckedLocalUser || (!hasLocalAccess && !isLoaded)) {
-    return (
-      <AppBootScreen
-        title="Opening Scribe"
-        detail="Starting the local-first workspace."
-      />
-    );
+  if (!hasCheckedLocalUser || !isLoaded) {
+    return <>{children}</>;
   }
 
   if (!hasLocalAccess) {
+    if (!isOffline) {
+      return null;
+    }
+
     return (
       <AppBootScreen
-        title={isOffline ? "Offline Setup Needed" : "Redirecting"}
-        detail={
-          isOffline
-            ? "This device needs one online sign-in before it can open offline."
-            : "Taking you to sign in so sync can reconnect."
-        }
+        title="Offline Setup Needed"
+        detail="This device needs one online sign-in before it can open offline."
       />
     );
   }

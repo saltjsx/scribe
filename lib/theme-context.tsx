@@ -26,20 +26,31 @@ function resolve(theme: Theme): ResolvedTheme {
   return theme === "system" ? getSystemTheme() : theme;
 }
 
-function getStoredTheme(): Theme {
-  if (typeof window === "undefined") {
-    return "system";
-  }
-
-  const stored = window.localStorage.getItem("theme");
-  return stored === "light" || stored === "dark" || stored === "system"
-    ? stored
+function parseStoredTheme(value: string | null): Theme {
+  return value === "light" || value === "dark" || value === "system"
+    ? value
     : "system";
 }
 
+function getDocumentTheme(): ResolvedTheme {
+  if (typeof document === "undefined") {
+    return "light";
+  }
+
+  return document.documentElement.getAttribute("data-theme") === "dark"
+    ? "dark"
+    : "light";
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>(getStoredTheme);
-  const [resolvedTheme, setResolved] = useState<ResolvedTheme>(() => resolve(getStoredTheme()));
+  const [theme, setThemeState] = useState<Theme>("system");
+  const [resolvedTheme, setResolved] = useState<ResolvedTheme>("light");
+
+  useEffect(() => {
+    const storedTheme = parseStoredTheme(window.localStorage.getItem("theme"));
+    setThemeState(storedTheme);
+    setResolved(storedTheme === "system" ? getDocumentTheme() : resolve(storedTheme));
+  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", resolvedTheme);
