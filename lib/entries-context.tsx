@@ -1,9 +1,10 @@
 "use client";
 
 import {
+  startTransition,
   createContext,
-  useContext,
   useCallback,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -56,6 +57,17 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Something went wrong.";
 }
 
+function sortEntries(entries: StoredEntry[]) {
+  return [...entries].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
+function upsertEntry(entries: StoredEntry[], nextEntry: StoredEntry) {
+  return sortEntries([
+    ...entries.filter((entry) => entry.id !== nextEntry.id),
+    nextEntry,
+  ]);
+}
+
 export function EntriesProvider({ children }: { children: React.ReactNode }) {
   const { getToken, isLoaded, userId: authUserId } = useAuth();
   const router = useRouter();
@@ -65,16 +77,15 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const vaultKeyRef = useRef<CryptoKey | null>(null);
   const deviceIdRef = useRef<string | null>(null);
-  const syncInFlightRef = useRef(false);
-  const syncNowRef = useRef<(() => Promise<void>) | null>(null);
   const hydrateEntriesRef = useRef<(() => Promise<void>) | null>(null);
+  const syncDelayTimeoutRef = useRef<number | null>(null);
   const retryTimeoutRef = useRef<number | null>(null);
   const retryAttemptRef = useRef(0);
   const entriesRef = useRef(entries);
-
-  useEffect(() => {
-    entriesRef.current = entries;
-  }, [entries]);
+  const optimisticRevisionRef = useRef(0);
+  const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const syncRequestedRef = useRef(false);
+  const syncLoopInFlightRef = useRef(false);
 
   const cachedUserId = useSyncExternalStore(
     () => () => {},
@@ -98,6 +109,13 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
   const userId = authUserId ?? cachedUserId;
   const canSyncRemotely = Boolean(authUserId && authUserId === userId);
 
+  const replaceEntries = useCallback((nextEntries: StoredEntry[]) => {
+    entriesRef.current = nextEntries;
+    startTransition(() => {
+      setEntries(nextEntries);
+    });
+  }, []);
+
   const clearScheduledRetry = useCallback(() => {
     if (retryTimeoutRef.current !== null) {
       window.clearTimeout(retryTimeoutRef.current);
@@ -105,29 +123,12 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const scheduleSyncRetry = useCallback((message: string) => {
-    if (!userId || !navigator.onLine) {
-      return;
+  const clearScheduledSync = useCallback(() => {
+    if (syncDelayTimeoutRef.current !== null) {
+      window.clearTimeout(syncDelayTimeoutRef.current);
+      syncDelayTimeoutRef.current = null;
     }
-
-    clearScheduledRetry();
-    retryAttemptRef.current += 1;
-
-    const delayMs = Math.min(2000 * 2 ** (retryAttemptRef.current - 1), 60000);
-    const delaySeconds = Math.ceil(delayMs / 1000);
-
-    setSyncStatus("error");
-    setSyncMessage(`${message}. Retrying automatically in ${delaySeconds}s.`);
-
-    retryTimeoutRef.current = window.setTimeout(() => {
-      if (vaultKeyRef.current) {
-        void syncNowRef.current?.();
-        return;
-      }
-
-      void hydrateEntriesRef.current?.();
-    }, delayMs);
-  }, [clearScheduledRetry, userId]);
+  }, []);
 
   const getSessionToken = useCallback(async () => {
     if (!canSyncRemotely) {
@@ -138,8 +139,44 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     return token ?? null;
   }, [canSyncRemotely, getToken]);
 
-  const syncNow = useCallback(async () => {
-    if (!userId || !vaultKeyRef.current || syncInFlightRef.current) {
+  const scheduleSyncRetry = useCallback((message: string) => {
+    if (!userId || !navigator.onLine) {
+      return;
+    }
+
+    clearScheduledRetry();
+    clearScheduledSync();
+    retryAttemptRef.current += 1;
+
+    const delayMs = Math.min(2000 * 2 ** (retryAttemptRef.current - 1), 60000);
+    const delaySeconds = Math.ceil(delayMs / 1000);
+
+    setSyncStatus("error");
+    setSyncMessage(`${message}. Sync will retry in ${delaySeconds}s.`);
+
+    retryTimeoutRef.current = window.setTimeout(() => {
+      if (vaultKeyRef.current) {
+        syncRequestedRef.current = true;
+        syncDelayTimeoutRef.current = window.setTimeout(() => {
+          syncDelayTimeoutRef.current = null;
+          if (syncLoopInFlightRef.current || !syncRequestedRef.current) {
+            return;
+          }
+
+          void performSyncLoopRef.current?.();
+        }, 0);
+        return;
+      }
+
+      void hydrateEntriesRef.current?.();
+    }, delayMs);
+  }, [clearScheduledRetry, clearScheduledSync, userId]);
+
+  const performSyncRef = useRef<(() => Promise<void>) | null>(null);
+  const performSyncLoopRef = useRef<(() => Promise<void>) | null>(null);
+
+  const performSync = useCallback(async () => {
+    if (!userId || !vaultKeyRef.current) {
       return;
     }
 
@@ -147,9 +184,11 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       clearScheduledRetry();
       retryAttemptRef.current = 0;
       setSyncStatus("saved-local");
-      setSyncMessage("Saved locally. Waiting for connection.");
+      setSyncMessage("Saved locally. Waiting for a connection.");
       return;
     }
+
+    await persistQueueRef.current.catch(() => {});
 
     const sessionToken = await getSessionToken();
     if (!sessionToken) {
@@ -165,32 +204,84 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     }
 
     clearScheduledRetry();
-    syncInFlightRef.current = true;
-    setSyncStatus("syncing");
-    setSyncMessage("Syncing with Neon...");
+    const syncRevision = optimisticRevisionRef.current;
 
     try {
       const nextEntries = await syncUserEntries(userId, vaultKeyRef.current, sessionToken);
-      setEntries(nextEntries);
       retryAttemptRef.current = 0;
+      if (syncRevision === optimisticRevisionRef.current) {
+        replaceEntries(nextEntries);
+      }
       setSyncStatus("saved-local");
-      setSyncMessage("Saved locally and synced.");
+      setSyncMessage(null);
     } catch (error) {
       scheduleSyncRetry(getErrorMessage(error));
-    } finally {
-      syncInFlightRef.current = false;
     }
-  }, [canSyncRemotely, clearScheduledRetry, getSessionToken, scheduleSyncRetry, userId]);
+  }, [canSyncRemotely, clearScheduledRetry, getSessionToken, replaceEntries, scheduleSyncRetry, userId]);
 
   useEffect(() => {
-    syncNowRef.current = syncNow;
-  }, [syncNow]);
+    performSyncRef.current = performSync;
+  }, [performSync]);
+
+  const performSyncLoop = useCallback(async () => {
+    if (syncLoopInFlightRef.current) {
+      return;
+    }
+
+    syncLoopInFlightRef.current = true;
+
+    try {
+      while (syncRequestedRef.current) {
+        syncRequestedRef.current = false;
+        await performSyncRef.current?.();
+      }
+    } finally {
+      syncLoopInFlightRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    performSyncLoopRef.current = performSyncLoop;
+  }, [performSyncLoop]);
+
+  const scheduleBackgroundSync = useCallback((delayMs = 0) => {
+    if (!userId) {
+      return;
+    }
+
+    syncRequestedRef.current = true;
+    clearScheduledRetry();
+
+    if (syncLoopInFlightRef.current) {
+      return;
+    }
+
+    clearScheduledSync();
+    syncDelayTimeoutRef.current = window.setTimeout(() => {
+      syncDelayTimeoutRef.current = null;
+      void performSyncLoop();
+    }, delayMs);
+  }, [clearScheduledRetry, clearScheduledSync, performSyncLoop, userId]);
+
+  const syncNow = useCallback(async () => {
+    if (!userId) {
+      return;
+    }
+
+    if (!vaultKeyRef.current) {
+      void hydrateEntriesRef.current?.();
+      return;
+    }
+
+    scheduleBackgroundSync(0);
+  }, [scheduleBackgroundSync, userId]);
 
   useEffect(() => {
     return () => {
       clearScheduledRetry();
+      clearScheduledSync();
     };
-  }, [clearScheduledRetry]);
+  }, [clearScheduledRetry, clearScheduledSync]);
 
   const unlockVaultFromServer = useCallback(async () => {
     if (!authUserId) {
@@ -229,18 +320,18 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         vaultKeyRef.current = vaultKey;
 
         const nextEntries = await loadStoredEntries(userId, vaultKey);
-        setEntries(nextEntries);
+        replaceEntries(nextEntries);
         setIsHydrated(true);
         setSyncStatus("saved-local");
         setSyncMessage(nextEntries.length > 0 ? "Opened from local storage." : "Ready for your first entry.");
         if (canSyncRemotely) {
-          void syncNow();
+          scheduleBackgroundSync(1200);
         }
         return;
       }
 
       if (!navigator.onLine) {
-        setEntries([]);
+        replaceEntries([]);
         setIsHydrated(true);
         setSyncStatus("error");
         setSyncMessage("This device needs one online unlock before it can open offline.");
@@ -254,20 +345,20 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       }
 
       const nextEntries = await loadStoredEntries(userId, vaultKey);
-      setEntries(nextEntries);
+      replaceEntries(nextEntries);
       setIsHydrated(true);
       setSyncStatus("saved-local");
       setSyncMessage(nextEntries.length > 0 ? "Offline access is ready." : "Ready for your first entry.");
 
       if (canSyncRemotely) {
-        void syncNow();
+        scheduleBackgroundSync(1200);
       }
     } catch (error) {
-      setEntries([]);
+      replaceEntries([]);
       setIsHydrated(true);
       scheduleSyncRetry(getErrorMessage(error));
     }
-  }, [canSyncRemotely, scheduleSyncRetry, syncNow, unlockVaultFromServer, userId]);
+  }, [canSyncRemotely, replaceEntries, scheduleBackgroundSync, scheduleSyncRetry, unlockVaultFromServer, userId]);
 
   useEffect(() => {
     hydrateEntriesRef.current = hydrateEntries;
@@ -279,12 +370,14 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (!userId) {
+      clearScheduledSync();
       clearScheduledRetry();
       retryAttemptRef.current = 0;
+      syncRequestedRef.current = false;
       vaultKeyRef.current = null;
       deviceIdRef.current = null;
       clearLastActiveUserId();
-      setEntries([]);
+      replaceEntries([]);
       setIsHydrated(false);
       setSyncStatus("loading");
       setSyncMessage(null);
@@ -292,7 +385,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     }
 
     void hydrateEntries();
-  }, [cachedUserId, clearScheduledRetry, hasCheckedCachedUser, hydrateEntries, isLoaded, userId]);
+  }, [cachedUserId, clearScheduledRetry, clearScheduledSync, hasCheckedCachedUser, hydrateEntries, isLoaded, replaceEntries, userId]);
 
   useEffect(() => {
     if (!isHydrated || !userId || !canSyncRemotely) {
@@ -301,7 +394,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
     const handleOnline = () => {
       if (vaultKeyRef.current) {
-        void syncNow();
+        scheduleBackgroundSync(400);
         return;
       }
 
@@ -310,12 +403,12 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        void syncNow();
+        scheduleBackgroundSync(0);
       }
     };
 
     const intervalId = window.setInterval(() => {
-      void syncNow();
+      scheduleBackgroundSync(0);
     }, 30000);
 
     window.addEventListener("online", handleOnline);
@@ -326,16 +419,33 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("online", handleOnline);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [canSyncRemotely, hydrateEntries, isHydrated, syncNow, userId]);
+  }, [canSyncRemotely, hydrateEntries, isHydrated, scheduleBackgroundSync, userId]);
+
+  const queueBackgroundMutation = useCallback((params: Parameters<typeof queueLocalMutation>[0]) => {
+    persistQueueRef.current = persistQueueRef.current
+      .catch(() => {})
+      .then(async () => {
+        await queueLocalMutation(params);
+      })
+      .then(() => {
+        scheduleBackgroundSync(600);
+      })
+      .catch((error) => {
+        scheduleSyncRetry(getErrorMessage(error));
+      });
+  }, [scheduleBackgroundSync, scheduleSyncRetry]);
 
   const addEntry = useCallback(async (mood: number, bodyHtml: string) => {
-    if (!userId || !vaultKeyRef.current || !deviceIdRef.current) {
+    if (!userId || !vaultKeyRef.current) {
       return;
     }
 
+    const deviceId = deviceIdRef.current ?? getDeviceId();
+    deviceIdRef.current = deviceId;
     const now = new Date();
     const entryId = createEntryId(now);
     const updatedAt = now.toISOString();
+    const mutationId = createRandomId();
     const newEntry: Entry = {
       id: entryId,
       mood,
@@ -343,27 +453,34 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       tags: [],
       ...formatEntryDates(now),
     };
+    const optimisticEntry: StoredEntry = {
+      ...newEntry,
+      updatedAt,
+      deletedAt: null,
+      deviceId,
+      lastMutationId: mutationId,
+    };
 
-    await queueLocalMutation({
+    optimisticRevisionRef.current += 1;
+    replaceEntries(upsertEntry(entriesRef.current, optimisticEntry));
+    setSyncStatus("saved-local");
+    setSyncMessage(null);
+    router.push(`/app/entry/${entryId}`);
+
+    queueBackgroundMutation({
       userId,
       entry: newEntry,
       vaultKey: vaultKeyRef.current,
-      deviceId: deviceIdRef.current,
+      deviceId,
       updatedAt,
       deletedAt: null,
-      mutationId: createRandomId(),
+      mutationId,
       operation: "upsert",
     });
-
-    setEntries(await loadStoredEntries(userId, vaultKeyRef.current));
-    setSyncStatus("saved-local");
-    setSyncMessage("Saved locally.");
-    router.push(`/app/entry/${entryId}`);
-    void syncNow();
-  }, [router, syncNow, userId]);
+  }, [queueBackgroundMutation, replaceEntries, router, userId]);
 
   const updateEntry = useCallback(async (id: string, mood: number, bodyHtml: string) => {
-    if (!userId || !vaultKeyRef.current || !deviceIdRef.current) {
+    if (!userId || !vaultKeyRef.current) {
       return;
     }
 
@@ -372,7 +489,26 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    await queueLocalMutation({
+    const deviceId = deviceIdRef.current ?? getDeviceId();
+    deviceIdRef.current = deviceId;
+    const updatedAt = new Date().toISOString();
+    const mutationId = createRandomId();
+    const optimisticEntry: StoredEntry = {
+      ...existingEntry,
+      mood,
+      body: bodyHtml,
+      updatedAt,
+      deletedAt: null,
+      deviceId,
+      lastMutationId: mutationId,
+    };
+
+    optimisticRevisionRef.current += 1;
+    replaceEntries(upsertEntry(entriesRef.current, optimisticEntry));
+    setSyncStatus("saved-local");
+    setSyncMessage(null);
+
+    queueBackgroundMutation({
       userId,
       entry: {
         ...existingEntry,
@@ -380,21 +516,16 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         body: bodyHtml,
       },
       vaultKey: vaultKeyRef.current,
-      deviceId: deviceIdRef.current,
-      updatedAt: new Date().toISOString(),
+      deviceId,
+      updatedAt,
       deletedAt: null,
-      mutationId: createRandomId(),
+      mutationId,
       operation: "upsert",
     });
-
-    setEntries(await loadStoredEntries(userId, vaultKeyRef.current));
-    setSyncStatus("saved-local");
-    setSyncMessage("Saved locally.");
-    void syncNow();
-  }, [syncNow, userId]);
+  }, [queueBackgroundMutation, replaceEntries, userId]);
 
   const deleteEntry = useCallback(async (id: string) => {
-    if (!userId || !vaultKeyRef.current || !deviceIdRef.current) {
+    if (!userId || !vaultKeyRef.current) {
       return;
     }
 
@@ -403,23 +534,28 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    await queueLocalMutation({
+    const deviceId = deviceIdRef.current ?? getDeviceId();
+    deviceIdRef.current = deviceId;
+    const deletedAt = new Date().toISOString();
+    const mutationId = createRandomId();
+
+    optimisticRevisionRef.current += 1;
+    replaceEntries(entriesRef.current.filter((entry) => entry.id !== id));
+    setSyncStatus("saved-local");
+    setSyncMessage(null);
+    router.push("/app");
+
+    queueBackgroundMutation({
       userId,
       entry: existingEntry,
       vaultKey: vaultKeyRef.current,
-      deviceId: deviceIdRef.current,
-      updatedAt: new Date().toISOString(),
-      deletedAt: new Date().toISOString(),
-      mutationId: createRandomId(),
+      deviceId,
+      updatedAt: deletedAt,
+      deletedAt,
+      mutationId,
       operation: "delete",
     });
-
-    setEntries(await loadStoredEntries(userId, vaultKeyRef.current));
-    setSyncStatus("saved-local");
-    setSyncMessage("Deleted locally.");
-    router.push("/app");
-    void syncNow();
-  }, [router, syncNow, userId]);
+  }, [queueBackgroundMutation, replaceEntries, router, userId]);
 
   return (
     <EntriesContext.Provider
