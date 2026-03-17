@@ -20,10 +20,30 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  // Network-first strategy for navigation requests
+  if (event.request.method !== "GET") {
+    return;
+  }
+
+  // Cache-first navigations keep the shell instant while the network refreshes in the background.
   if (event.request.mode === "navigate") {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match("/"))
+      caches.open(CACHE_NAME).then(async (cache) => {
+        const cached = await cache.match(event.request);
+        const fetched = fetch(event.request).then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            void cache.put(event.request, clone);
+          }
+          return response;
+        });
+
+        if (cached) {
+          event.waitUntil(fetched.catch(() => undefined));
+          return cached;
+        }
+
+        return fetched.catch(() => cache.match("/") || Response.error());
+      })
     );
     return;
   }

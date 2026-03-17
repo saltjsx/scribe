@@ -64,6 +64,7 @@ interface ScribeSyncDB extends DBSchema {
 const DATABASE_NAME = "scribe-sync";
 const DATABASE_VERSION = 2;
 const DEVICE_ID_KEY = "scribe-device-id";
+const LAST_ACTIVE_USER_ID_KEY = "scribe-last-user-id";
 
 let databasePromise: Promise<IDBPDatabase<ScribeSyncDB>> | null = null;
 
@@ -168,4 +169,16 @@ export function getDeviceId() {
   const nextValue = createRandomId();
   globalThis.localStorage.setItem(DEVICE_ID_KEY, nextValue);
   return nextValue;
+}
+
+export function getLastActiveUserId() {
+  return globalThis.localStorage.getItem(LAST_ACTIVE_USER_ID_KEY);
+}
+
+export function setLastActiveUserId(userId: string) {
+  globalThis.localStorage.setItem(LAST_ACTIVE_USER_ID_KEY, userId);
+}
+
+export function clearLastActiveUserId() {
+  globalThis.localStorage.removeItem(LAST_ACTIVE_USER_ID_KEY);
 }

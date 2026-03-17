@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { House, BookOpen, MagnifyingGlass, PenNib, X, Sun, Moon, Monitor } from "@phosphor-icons/react";
-import { UserButton } from "@clerk/nextjs";
+import { UserButton, useAuth } from "@clerk/nextjs";
 import { useWebHaptics } from "web-haptics/react";
 import { useTheme } from "@/lib/theme-context";
 import { useEntries } from "@/lib/entries-context";
@@ -39,6 +39,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const isHome = pathname === "/app";
   const isNew = pathname === "/app/new";
+  const { userId } = useAuth();
   const { entries, isHydrated } = useEntries();
   const haptic = useWebHaptics();
   const { theme, setTheme } = useTheme();
@@ -160,18 +161,27 @@ export default function Sidebar() {
         <div className="h-[0.5px] bg-[var(--divider)] mb-3" />
         <div className="flex items-center gap-1 px-1">
           <div className="flex-1 min-w-0">
-            <UserButton
-              showName
-              appearance={{
-                elements: {
-                  rootBox: "w-full",
-                  userButtonTrigger: "w-full !justify-start",
-                  userButtonBox: "!flex-row-reverse !gap-2",
-                  userButtonOuterIdentifier: "!text-[12px] !text-[var(--foreground)] !font-normal !pl-0",
-                  avatarBox: "!h-[22px] !w-[22px]",
-                },
-              }}
-            />
+            {userId ? (
+              <UserButton
+                showName
+                appearance={{
+                  elements: {
+                    rootBox: "w-full",
+                    userButtonTrigger: "w-full !justify-start",
+                    userButtonBox: "!flex-row-reverse !gap-2",
+                    userButtonOuterIdentifier: "!text-[12px] !text-[var(--foreground)] !font-normal !pl-0",
+                    avatarBox: "!h-[22px] !w-[22px]",
+                  },
+                }}
+              />
+            ) : (
+              <Link
+                href="/sign-in"
+                className="block truncate rounded-md px-2 py-1 text-[12px] text-[var(--muted)] transition-colors hover:bg-[var(--sidebar-hover)] hover:text-[var(--foreground)]"
+              >
+                Sign in to sync
+              </Link>
+            )}
           </div>
           <button
             onClick={() => {

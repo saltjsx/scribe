@@ -26,19 +26,24 @@ function resolve(theme: Theme): ResolvedTheme {
   return theme === "system" ? getSystemTheme() : theme;
 }
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("system");
-  const [resolvedTheme, setResolved] = useState<ResolvedTheme>("light");
+function getStoredTheme(): Theme {
+  if (typeof window === "undefined") {
+    return "system";
+  }
 
-  // Read stored preference on mount
+  const stored = window.localStorage.getItem("theme");
+  return stored === "light" || stored === "dark" || stored === "system"
+    ? stored
+    : "system";
+}
+
+export function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const [theme, setThemeState] = useState<Theme>(getStoredTheme);
+  const [resolvedTheme, setResolved] = useState<ResolvedTheme>(() => resolve(getStoredTheme()));
+
   useEffect(() => {
-    const stored = localStorage.getItem("theme") as Theme | null;
-    const t = stored ?? "system";
-    setThemeState(t);
-    const r = resolve(t);
-    setResolved(r);
-    document.documentElement.setAttribute("data-theme", r);
-  }, []);
+    document.documentElement.setAttribute("data-theme", resolvedTheme);
+  }, [resolvedTheme]);
 
   // Listen for system preference changes
   useEffect(() => {

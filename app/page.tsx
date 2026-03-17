@@ -1,8 +1,20 @@
-import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
+"use client";
 
-export default async function Home() {
-  const { userId } = await auth();
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { AppBootScreen } from "@/components/app-boot-screen";
 
-  redirect(userId ? "/app" : "/sign-in");
+export default function Home() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/app");
+  }, [router]);
+
+  return (
+    <AppBootScreen
+      title="Opening Scribe"
+      detail="Loading your local journal."
+    />
+  );
 }

@@ -7,6 +7,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
@@ -21,7 +22,12 @@ import {
 } from "@/lib/sync/client";
 import { importVaultKey } from "@/lib/sync/crypto";
 import { cacheVaultKeyLocally, loadCachedVaultKey } from "@/lib/sync/device-vault";
-import { getDeviceId } from "@/lib/sync/local-store";
+import {
+  clearLastActiveUserId,
+  getDeviceId,
+  getLastActiveUserId,
+  setLastActiveUserId,
+} from "@/lib/sync/local-store";
 import { createRandomId } from "@/lib/sync/random";
 
 interface EntriesContextValue {
@@ -51,7 +57,7 @@ function getErrorMessage(error: unknown) {
 }
 
 export function EntriesProvider({ children }: { children: React.ReactNode }) {
-  const { getToken, isLoaded, userId } = useAuth();
+  const { getToken, isLoaded, userId: authUserId } = useAuth();
   const router = useRouter();
   const [entries, setEntries] = useState<StoredEntry[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -69,6 +75,28 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     entriesRef.current = entries;
   }, [entries]);
+
+  const cachedUserId = useSyncExternalStore(
+    () => () => {},
+    getLastActiveUserId,
+    () => null
+  );
+  const hasCheckedCachedUser = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
+
+  useEffect(() => {
+    if (!authUserId) {
+      return;
+    }
+
+    setLastActiveUserId(authUserId);
+  }, [authUserId]);
+
+  const userId = authUserId ?? cachedUserId;
+  const canSyncRemotely = Boolean(authUserId && authUserId === userId);
 
   const clearScheduledRetry = useCallback(() => {
     if (retryTimeoutRef.current !== null) {
@@ -102,9 +130,13 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
   }, [clearScheduledRetry, userId]);
 
   const getSessionToken = useCallback(async () => {
+    if (!canSyncRemotely) {
+      return null;
+    }
+
     const token = await getToken();
     return token ?? null;
-  }, [getToken]);
+  }, [canSyncRemotely, getToken]);
 
   const syncNow = useCallback(async () => {
     if (!userId || !vaultKeyRef.current || syncInFlightRef.current) {
@@ -121,7 +153,14 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
     const sessionToken = await getSessionToken();
     if (!sessionToken) {
-      scheduleSyncRetry("Waiting for sign-in to finish");
+      clearScheduledRetry();
+      retryAttemptRef.current = 0;
+      setSyncStatus("saved-local");
+      setSyncMessage(
+        canSyncRemotely
+          ? "Saved locally. Waiting for sign-in."
+          : "Saved locally. Sign in to sync."
+      );
       return;
     }
 
@@ -141,7 +180,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     } finally {
       syncInFlightRef.current = false;
     }
-  }, [clearScheduledRetry, getSessionToken, scheduleSyncRetry, userId]);
+  }, [canSyncRemotely, clearScheduledRetry, getSessionToken, scheduleSyncRetry, userId]);
 
   useEffect(() => {
     syncNowRef.current = syncNow;
@@ -154,23 +193,23 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
   }, [clearScheduledRetry]);
 
   const unlockVaultFromServer = useCallback(async () => {
-    if (!userId) {
+    if (!authUserId) {
       return null;
     }
 
     const sessionToken = await getSessionToken();
     if (!sessionToken) {
-      throw new Error("Waiting for sign-in to finish");
+      throw new Error("Sign in once on this device to unlock your vault.");
     }
 
     await bootstrapVault(sessionToken);
     const session = await fetchVaultSession(sessionToken);
-    await cacheVaultKeyLocally(userId, session.rawKey);
+    await cacheVaultKeyLocally(authUserId, session.rawKey);
 
     const vaultKey = await importVaultKey(session.rawKey);
     vaultKeyRef.current = vaultKey;
     return vaultKey;
-  }, [getSessionToken, userId]);
+  }, [authUserId, getSessionToken]);
 
   const hydrateEntries = useCallback(async () => {
     if (!userId) {
@@ -194,7 +233,9 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         setIsHydrated(true);
         setSyncStatus("saved-local");
         setSyncMessage(nextEntries.length > 0 ? "Opened from local storage." : "Ready for your first entry.");
-        void syncNow();
+        if (canSyncRemotely) {
+          void syncNow();
+        }
         return;
       }
 
@@ -218,20 +259,22 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       setSyncStatus("saved-local");
       setSyncMessage(nextEntries.length > 0 ? "Offline access is ready." : "Ready for your first entry.");
 
-      void syncNow();
+      if (canSyncRemotely) {
+        void syncNow();
+      }
     } catch (error) {
       setEntries([]);
       setIsHydrated(true);
       scheduleSyncRetry(getErrorMessage(error));
     }
-  }, [scheduleSyncRetry, syncNow, unlockVaultFromServer, userId]);
+  }, [canSyncRemotely, scheduleSyncRetry, syncNow, unlockVaultFromServer, userId]);
 
   useEffect(() => {
     hydrateEntriesRef.current = hydrateEntries;
   }, [hydrateEntries]);
 
   useEffect(() => {
-    if (!isLoaded) {
+    if (!hasCheckedCachedUser || (!cachedUserId && !isLoaded)) {
       return;
     }
 
@@ -240,6 +283,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       retryAttemptRef.current = 0;
       vaultKeyRef.current = null;
       deviceIdRef.current = null;
+      clearLastActiveUserId();
       setEntries([]);
       setIsHydrated(false);
       setSyncStatus("loading");
@@ -248,10 +292,10 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     }
 
     void hydrateEntries();
-  }, [clearScheduledRetry, hydrateEntries, isLoaded, userId]);
+  }, [cachedUserId, clearScheduledRetry, hasCheckedCachedUser, hydrateEntries, isLoaded, userId]);
 
   useEffect(() => {
-    if (!isHydrated || !userId) {
+    if (!isHydrated || !userId || !canSyncRemotely) {
       return;
     }
 
@@ -282,7 +326,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("online", handleOnline);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [hydrateEntries, isHydrated, syncNow, userId]);
+  }, [canSyncRemotely, hydrateEntries, isHydrated, syncNow, userId]);
 
   const addEntry = useCallback(async (mood: number, bodyHtml: string) => {
     if (!userId || !vaultKeyRef.current || !deviceIdRef.current) {
