@@ -15,9 +15,10 @@ import { useRouter } from "next/navigation";
 import type { Entry, StoredEntry, SyncStatus } from "./entries";
 import { createEntryId, formatEntryDates } from "./entries";
 import {
+  backfillLocalEntries,
   bootstrapVault,
   fetchVaultSession,
-  loadStoredEntries,
+  loadLocalEntries,
   queueLocalMutation,
   syncUserEntries,
 } from "@/lib/sync/client";
@@ -205,15 +206,25 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
     clearScheduledRetry();
     const syncRevision = optimisticRevisionRef.current;
+    setSyncStatus("syncing");
+    setSyncMessage("Syncing in the background...");
 
     try {
-      const nextEntries = await syncUserEntries(userId, vaultKeyRef.current, sessionToken);
+      const syncResult = await syncUserEntries(userId, vaultKeyRef.current, sessionToken);
       retryAttemptRef.current = 0;
       if (syncRevision === optimisticRevisionRef.current) {
-        replaceEntries(nextEntries);
+        replaceEntries(syncResult.entries);
       }
       setSyncStatus("saved-local");
-      setSyncMessage(null);
+      if (syncResult.pulledCount > 0 || syncResult.pushedCount > 0) {
+        setSyncMessage(
+          `Local database updated${syncResult.pushedCount > 0 ? `, ${syncResult.pushedCount} change${syncResult.pushedCount === 1 ? "" : "s"} synced` : ""}.`
+        );
+      } else if (syncResult.discardedCount > 0) {
+        setSyncMessage("Local database is open. Sync resolved a remote conflict.");
+      } else {
+        setSyncMessage("Local database is up to date.");
+      }
     } catch (error) {
       scheduleSyncRetry(getErrorMessage(error));
     }
@@ -309,24 +320,68 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
 
     setIsHydrated(false);
     setSyncStatus("loading");
-    setSyncMessage("Opening local vault...");
+    setSyncMessage("Opening local database...");
     deviceIdRef.current = getDeviceId();
 
+    let localEntriesLoaded = false;
+
     try {
+      const localEntries = await loadLocalEntries(userId);
+      if (localEntries.length > 0) {
+        localEntriesLoaded = true;
+        replaceEntries(localEntries);
+        setIsHydrated(true);
+        setSyncStatus("saved-local");
+        setSyncMessage("Opened instantly from local database.");
+      }
+
       const cachedRawVaultKey = await loadCachedVaultKey(userId);
 
       if (cachedRawVaultKey) {
         const vaultKey = await importVaultKey(cachedRawVaultKey);
         vaultKeyRef.current = vaultKey;
 
-        const nextEntries = await loadStoredEntries(userId, vaultKey);
-        replaceEntries(nextEntries);
-        setIsHydrated(true);
+        if (!localEntriesLoaded) {
+          const nextEntries = await backfillLocalEntries(userId, vaultKey);
+          replaceEntries(nextEntries);
+          setIsHydrated(true);
+          setSyncMessage(
+            nextEntries.length > 0
+              ? "Recovered your local database."
+              : "Ready for your first entry."
+          );
+        }
+
         setSyncStatus("saved-local");
-        setSyncMessage(nextEntries.length > 0 ? "Opened from local storage." : "Ready for your first entry.");
         if (canSyncRemotely) {
           scheduleBackgroundSync(1200);
         }
+        return;
+      }
+
+      if (localEntriesLoaded) {
+        if (authUserId && navigator.onLine) {
+          setSyncStatus("loading");
+          setSyncMessage("Refreshing secure sync access...");
+          const vaultKey = await unlockVaultFromServer();
+          if (!vaultKey) {
+            throw new Error("Unable to unlock your vault.");
+          }
+
+          setSyncStatus("saved-local");
+          setSyncMessage("Opened instantly from local database.");
+          if (canSyncRemotely) {
+            scheduleBackgroundSync(1200);
+          }
+          return;
+        }
+
+        setSyncStatus("saved-local");
+        setSyncMessage(
+          navigator.onLine
+            ? "Opened instantly from local database. Sign in to sync."
+            : "Opened instantly from local database. Waiting for a connection."
+        );
         return;
       }
 
@@ -344,7 +399,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Unable to unlock your vault.");
       }
 
-      const nextEntries = await loadStoredEntries(userId, vaultKey);
+      const nextEntries = await backfillLocalEntries(userId, vaultKey);
       replaceEntries(nextEntries);
       setIsHydrated(true);
       setSyncStatus("saved-local");
@@ -354,11 +409,13 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         scheduleBackgroundSync(1200);
       }
     } catch (error) {
-      replaceEntries([]);
-      setIsHydrated(true);
+      if (!localEntriesLoaded) {
+        replaceEntries([]);
+        setIsHydrated(true);
+      }
       scheduleSyncRetry(getErrorMessage(error));
     }
-  }, [canSyncRemotely, replaceEntries, scheduleBackgroundSync, scheduleSyncRetry, unlockVaultFromServer, userId]);
+  }, [authUserId, canSyncRemotely, replaceEntries, scheduleBackgroundSync, scheduleSyncRetry, unlockVaultFromServer, userId]);
 
   useEffect(() => {
     hydrateEntriesRef.current = hydrateEntries;
@@ -464,12 +521,13 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     optimisticRevisionRef.current += 1;
     replaceEntries(upsertEntry(entriesRef.current, optimisticEntry));
     setSyncStatus("saved-local");
-    setSyncMessage(null);
+    setSyncMessage("Saved locally. Sync queued.");
     router.push(`/app/entry/${entryId}`);
 
     queueBackgroundMutation({
       userId,
       entry: newEntry,
+      storedEntry: optimisticEntry,
       vaultKey: vaultKeyRef.current,
       deviceId,
       updatedAt,
@@ -506,7 +564,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     optimisticRevisionRef.current += 1;
     replaceEntries(upsertEntry(entriesRef.current, optimisticEntry));
     setSyncStatus("saved-local");
-    setSyncMessage(null);
+    setSyncMessage("Saved locally. Sync queued.");
 
     queueBackgroundMutation({
       userId,
@@ -515,6 +573,7 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
         mood,
         body: bodyHtml,
       },
+      storedEntry: optimisticEntry,
       vaultKey: vaultKeyRef.current,
       deviceId,
       updatedAt,
@@ -542,12 +601,19 @@ export function EntriesProvider({ children }: { children: React.ReactNode }) {
     optimisticRevisionRef.current += 1;
     replaceEntries(entriesRef.current.filter((entry) => entry.id !== id));
     setSyncStatus("saved-local");
-    setSyncMessage(null);
+    setSyncMessage("Deleted locally. Sync queued.");
     router.push("/app");
 
     queueBackgroundMutation({
       userId,
       entry: existingEntry,
+      storedEntry: {
+        ...existingEntry,
+        updatedAt: deletedAt,
+        deletedAt,
+        deviceId,
+        lastMutationId: mutationId,
+      },
       vaultKey: vaultKeyRef.current,
       deviceId,
       updatedAt: deletedAt,

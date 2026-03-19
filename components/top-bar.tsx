@@ -165,13 +165,17 @@ export default function TopBar() {
   const syncTone =
     syncStatus === "error"
       ? "text-red-500"
+      : syncStatus === "syncing"
+        ? "text-[var(--accent)]"
       : "text-[var(--muted)]";
   const syncLabel =
     syncStatus === "loading"
-      ? "Loading local vault"
+      ? (syncMessage ?? "Opening local database")
+      : syncStatus === "syncing"
+        ? (syncMessage ?? "Syncing in the background")
       : syncStatus === "error"
         ? (syncMessage ?? "Sync paused")
-        : "Saved locally";
+        : (syncMessage ?? "Saved locally");
 
   return (
     <header

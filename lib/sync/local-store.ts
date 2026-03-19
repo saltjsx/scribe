@@ -1,7 +1,7 @@
 "use client";
 
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
-import type { EncryptedEntryRecord, SyncMutation } from "@/lib/entries";
+import type { EncryptedEntryRecord, StoredEntry, SyncMutation } from "@/lib/entries";
 import { createRandomId } from "@/lib/sync/random";
 
 interface MetaRecord {
@@ -23,10 +23,22 @@ interface DeviceWrapKeyRecord {
   cryptoKey: CryptoKey;
 }
 
+export interface LocalEntrySnapshotRecord extends StoredEntry {
+  storageKey: string;
+  userId: string;
+}
+
 interface ScribeSyncDB extends DBSchema {
   entries: {
     key: string;
     value: EncryptedEntryRecord;
+    indexes: {
+      "by-user": string;
+    };
+  };
+  entrySnapshots: {
+    key: string;
+    value: LocalEntrySnapshotRecord;
     indexes: {
       "by-user": string;
     };
@@ -62,7 +74,7 @@ interface ScribeSyncDB extends DBSchema {
 }
 
 const DATABASE_NAME = "scribe-sync";
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
 const DEVICE_ID_KEY = "scribe-device-id";
 const LAST_ACTIVE_USER_ID_KEY = "scribe-last-user-id";
 
@@ -75,6 +87,11 @@ function getDatabase() {
         if (!db.objectStoreNames.contains("entries")) {
           const entryStore = db.createObjectStore("entries", { keyPath: "storageKey" });
           entryStore.createIndex("by-user", "userId");
+        }
+
+        if (!db.objectStoreNames.contains("entrySnapshots")) {
+          const snapshotStore = db.createObjectStore("entrySnapshots", { keyPath: "storageKey" });
+          snapshotStore.createIndex("by-user", "userId");
         }
 
         if (!db.objectStoreNames.contains("outbox")) {
@@ -117,6 +134,22 @@ export async function getEntryRecord(userId: string, entryId: string) {
 
 export async function putEntryRecord(record: EncryptedEntryRecord) {
   await (await getDatabase()).put("entries", record);
+}
+
+export async function listLocalEntrySnapshots(userId: string) {
+  return (await getDatabase()).getAllFromIndex("entrySnapshots", "by-user", userId);
+}
+
+export async function putLocalEntrySnapshot(userId: string, entry: StoredEntry) {
+  await (await getDatabase()).put("entrySnapshots", {
+    ...entry,
+    storageKey: createStorageKey(userId, entry.id),
+    userId,
+  });
+}
+
+export async function deleteLocalEntrySnapshot(userId: string, entryId: string) {
+  await (await getDatabase()).delete("entrySnapshots", createStorageKey(userId, entryId));
 }
 
 export async function listOutboxMutations(userId: string) {

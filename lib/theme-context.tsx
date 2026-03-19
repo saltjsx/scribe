@@ -43,14 +43,21 @@ function getDocumentTheme(): ResolvedTheme {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("system");
-  const [resolvedTheme, setResolved] = useState<ResolvedTheme>("light");
+  const [theme, setThemeState] = useState<Theme>(() => {
+    if (typeof window === "undefined") {
+      return "system";
+    }
 
-  useEffect(() => {
+    return parseStoredTheme(window.localStorage.getItem("theme"));
+  });
+  const [resolvedTheme, setResolved] = useState<ResolvedTheme>(() => {
+    if (typeof window === "undefined") {
+      return "light";
+    }
+
     const storedTheme = parseStoredTheme(window.localStorage.getItem("theme"));
-    setThemeState(storedTheme);
-    setResolved(storedTheme === "system" ? getDocumentTheme() : resolve(storedTheme));
-  }, []);
+    return storedTheme === "system" ? getDocumentTheme() : resolve(storedTheme);
+  });
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", resolvedTheme);
