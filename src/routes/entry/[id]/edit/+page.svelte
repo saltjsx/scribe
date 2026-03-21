@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import EntryEditor from '$lib/components/EntryEditor.svelte';
+	import { triggerHaptic } from '$lib/haptics';
 	import { deleteJournalEntry, journalEntries, updateJournalEntry } from '$lib/journal';
 
 	const entry = $derived($journalEntries.find((item) => item.id === (page.params.id ?? '')));
@@ -19,7 +20,9 @@
 
 	async function removeEntry() {
 		if (!entry || !confirm('Delete this entry?')) return;
+		triggerHaptic('warning');
 		await deleteJournalEntry(entry.id);
+		triggerHaptic('success');
 		await goto('/');
 	}
 </script>
@@ -29,7 +32,7 @@
 		<div class="topbar">
 			<div class="topbar-actions">
 				<button class="topbar-btn delete" onclick={removeEntry}>Delete</button>
-				<a class="topbar-btn cancel" href="/entry/{entry.id}">Cancel</a>
+				<a class="topbar-btn cancel" href="/entry/{entry.id}" onclick={() => triggerHaptic('selection')}>Cancel</a>
 			</div>
 		</div>
 

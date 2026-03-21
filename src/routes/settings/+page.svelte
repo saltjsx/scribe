@@ -12,6 +12,7 @@
 	} from 'phosphor-svelte';
 	import { cycleTheme, getTheme } from '$lib/theme.svelte';
 	import { authClient } from '$lib/auth-client';
+	import { triggerHaptic } from '$lib/haptics';
 	import { setJournalUser, syncStatus } from '$lib/journal';
 	import { goto } from '$app/navigation';
 	import type { User } from 'better-auth';
@@ -73,6 +74,7 @@
 
 	async function signOut() {
 		isSigningOut = true;
+		triggerHaptic('light');
 		const { error } = await authClient.signOut();
 		if (!error) {
 			await setJournalUser(null);
@@ -103,7 +105,10 @@
 	<!-- Appearance -->
 	<section class="settings-section">
 		<h2 class="section-label">APPEARANCE</h2>
-		<button class="settings-row" onclick={cycleTheme}>
+		<button class="settings-row" onclick={() => {
+			triggerHaptic('selection');
+			cycleTheme();
+		}}>
 			<span class="settings-row-left">
 				{#if getTheme() === 'light'}
 					<Sun size={22} weight="regular" />

@@ -2,6 +2,7 @@
 	import { PenNib } from 'phosphor-svelte';
 	import ContributionGraph from '$lib/components/ContributionGraph.svelte';
 	import MoodGraph from '$lib/components/MoodGraph.svelte';
+	import { triggerHaptic } from '$lib/haptics';
 	import { journalEntries, journalLoaded } from '$lib/journal';
 </script>
 
@@ -9,7 +10,7 @@
 	<!-- Header -->
 	<header class="home-header">
 		<h1 class="home-title">Scribe</h1>
-		<a href="/new" class="new-entry-pill">
+		<a href="/new" class="new-entry-pill" onclick={() => triggerHaptic('medium')}>
 			<PenNib size={18} weight="fill" />
 			<span>New Entry</span>
 		</a>

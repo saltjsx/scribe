@@ -13,6 +13,7 @@
 	import { cycleTheme, getTheme } from '$lib/theme.svelte';
 	import { getMoodLabel, getMoodDotColor } from '$lib/entries';
 	import { authClient } from '$lib/auth-client';
+	import { triggerHaptic } from '$lib/haptics';
 	import { journalEntries, journalLoaded, setJournalUser, syncStatus } from '$lib/journal';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
@@ -91,6 +92,7 @@
 
 	async function signOut() {
 		isSigningOut = true;
+		triggerHaptic('light');
 
 		const { error } = await authClient.signOut();
 
@@ -124,7 +126,11 @@
 		{#if searchQuery}
 			<button
 				class="search-clear"
-				onclick={() => { searchQuery = ''; searchInput?.focus(); }}
+				onclick={() => {
+					triggerHaptic('light');
+					searchQuery = '';
+					searchInput?.focus();
+				}}
 				aria-label="Clear search"
 			>
 				<XCircle size={14} weight="fill" />
@@ -133,7 +139,7 @@
 	</div>
 
 	<!-- Home -->
-	<a href="/" class="nav-item" class:active={currentPath === '/'}>
+	<a href="/" class="nav-item" class:active={currentPath === '/'} onclick={() => triggerHaptic('selection')}>
 		<House size={18} weight={currentPath === '/' ? 'fill' : 'regular'} />
 		<span>Home</span>
 	</a>
@@ -149,6 +155,7 @@
 						href="/entry/{entry.id}"
 						class="entry-item"
 						class:selected={currentEntryId === entry.id}
+						onclick={() => triggerHaptic('selection')}
 					>
 						<div class="entry-row">
 							<span class="entry-icon">
@@ -177,7 +184,7 @@
 
 	<!-- Bottom section -->
 	<div class="sidebar-bottom">
-		<a href="/new" class="new-entry-btn">
+		<a href="/new" class="new-entry-btn" onclick={() => triggerHaptic('medium')}>
 			<PenNib size={18} weight="fill" />
 			<span>New Entry</span>
 		</a>
@@ -196,7 +203,10 @@
 			<button
 				class="theme-btn"
 				aria-label="Switch theme ({getTheme()})"
-				onclick={cycleTheme}
+				onclick={() => {
+					triggerHaptic('selection');
+					cycleTheme();
+				}}
 				title={getTheme() === 'light' ? 'Light' : getTheme() === 'dark' ? 'Dark' : 'System'}
 			>
 				{#if getTheme() === 'light'}

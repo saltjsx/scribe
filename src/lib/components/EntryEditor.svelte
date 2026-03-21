@@ -17,6 +17,7 @@
 		FloppyDisk
 	} from 'phosphor-svelte';
 	import MoodSlider from '$lib/components/MoodSlider.svelte';
+	import { triggerHaptic } from '$lib/haptics';
 
 	let {
 		dateLabel,
@@ -67,21 +68,33 @@
 		editor?.destroy();
 	});
 
-	function toggleBold() { editor?.chain().focus().toggleBold().run(); }
-	function toggleItalic() { editor?.chain().focus().toggleItalic().run(); }
-	function toggleUnderline() { editor?.chain().focus().toggleUnderline().run(); }
-	function toggleStrike() { editor?.chain().focus().toggleStrike().run(); }
-	function toggleBulletList() { editor?.chain().focus().toggleBulletList().run(); }
-	function toggleOrderedList() { editor?.chain().focus().toggleOrderedList().run(); }
-	function toggleBlockquote() { editor?.chain().focus().toggleBlockquote().run(); }
-	function undo() { editor?.chain().focus().undo().run(); }
-	function redo() { editor?.chain().focus().redo().run(); }
+	function pulseSelection(action: () => void) {
+		action();
+		triggerHaptic('selection');
+	}
+
+	function toggleBold() { pulseSelection(() => editor?.chain().focus().toggleBold().run()); }
+	function toggleItalic() { pulseSelection(() => editor?.chain().focus().toggleItalic().run()); }
+	function toggleUnderline() { pulseSelection(() => editor?.chain().focus().toggleUnderline().run()); }
+	function toggleStrike() { pulseSelection(() => editor?.chain().focus().toggleStrike().run()); }
+	function toggleBulletList() { pulseSelection(() => editor?.chain().focus().toggleBulletList().run()); }
+	function toggleOrderedList() { pulseSelection(() => editor?.chain().focus().toggleOrderedList().run()); }
+	function toggleBlockquote() { pulseSelection(() => editor?.chain().focus().toggleBlockquote().run()); }
+	function undo() { pulseSelection(() => editor?.chain().focus().undo().run()); }
+	function redo() { pulseSelection(() => editor?.chain().focus().redo().run()); }
 
 	async function saveEntry() {
-		await onSave({
-			body: editor?.getHTML().trim() ?? '',
-			mood
-		});
+		triggerHaptic('medium');
+		try {
+			await onSave({
+				body: editor?.getHTML().trim() ?? '',
+				mood
+			});
+			triggerHaptic('success');
+		} catch (error) {
+			triggerHaptic('error');
+			throw error;
+		}
 	}
 </script>
 

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { MagnifyingGlass, BookOpenText, XCircle } from 'phosphor-svelte';
 	import { getMoodLabel, getMoodDotColor } from '$lib/entries';
+	import { triggerHaptic } from '$lib/haptics';
 	import { journalEntries, journalLoaded } from '$lib/journal';
 
 	let searchQuery = $state('');
@@ -44,6 +45,7 @@
 			<button
 				class="search-clear"
 				onclick={() => {
+					triggerHaptic('light');
 					searchQuery = '';
 					searchInput?.focus();
 				}}
@@ -58,7 +60,7 @@
 	<div class="entry-list">
 		{#if filteredEntries().length > 0}
 			{#each filteredEntries() as entry (entry.id)}
-				<a href="/entry/{entry.id}" class="entry-card">
+				<a href="/entry/{entry.id}" class="entry-card" onclick={() => triggerHaptic('selection')}>
 					<div class="entry-card-left">
 						<span class="entry-card-icon">
 							<BookOpenText size={22} weight="regular" />
@@ -82,7 +84,7 @@
 			<div class="entries-empty">
 				<p>{searchQuery ? 'No matching entries.' : 'No journal entries yet.'}</p>
 				{#if !searchQuery}
-					<a href="/new" class="entries-empty-cta">Write your first entry</a>
+					<a href="/new" class="entries-empty-cta" onclick={() => triggerHaptic('medium')}>Write your first entry</a>
 				{/if}
 			</div>
 		{/if}

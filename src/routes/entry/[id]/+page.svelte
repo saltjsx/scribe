@@ -3,13 +3,16 @@
 	import { goto } from '$app/navigation';
 	import { Trash, PencilSimple, CaretLeft } from 'phosphor-svelte';
 	import { getMoodLabel, getMoodColor, getMoodEmoji } from '$lib/entries';
+	import { triggerHaptic } from '$lib/haptics';
 	import { deleteJournalEntry, journalEntries } from '$lib/journal';
 
 	const entry = $derived($journalEntries.find((item) => item.id === (page.params.id ?? '')));
 
 	async function removeEntry() {
 		if (!entry || !confirm('Delete this entry?')) return;
+		triggerHaptic('warning');
 		await deleteJournalEntry(entry.id);
+		triggerHaptic('success');
 		await goto('/');
 	}
 </script>
@@ -18,7 +21,7 @@
 	<div class="entry-page">
 		<!-- Top bar -->
 		<div class="topbar">
-			<a href="/entries" class="topbar-back" aria-label="Back to entries">
+			<a href="/entries" class="topbar-back" aria-label="Back to entries" onclick={() => triggerHaptic('selection')}>
 				<CaretLeft size={20} weight="bold" />
 				<span>Entries</span>
 			</a>
@@ -27,7 +30,7 @@
 					<Trash size={15} weight="regular" />
 					<span>Delete</span>
 				</button>
-				<a class="topbar-btn edit" href="/entry/{entry.id}/edit">
+				<a class="topbar-btn edit" href="/entry/{entry.id}/edit" onclick={() => triggerHaptic('selection')}>
 					<PencilSimple size={15} weight="regular" />
 					<span>Edit</span>
 				</a>

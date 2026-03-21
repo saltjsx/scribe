@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { House, BookOpenText, PenNib, GearSix } from 'phosphor-svelte';
 	import { page } from '$app/state';
+	import { triggerHaptic } from '$lib/haptics';
 
 	const currentPath = $derived(page.url.pathname);
 
@@ -31,6 +32,11 @@
 			class:active
 			class:accent={'accent' in tab && tab.accent}
 			aria-current={active ? 'page' : undefined}
+			onclick={() => {
+				if (!active) {
+					triggerHaptic('selection');
+				}
+			}}
 		>
 			<span class="mobile-nav-icon">
 				<tab.icon size={24} weight={active ? 'fill' : 'regular'} />

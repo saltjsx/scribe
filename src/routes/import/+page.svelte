@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { triggerHaptic } from '$lib/haptics';
 	import { importJournalEntries } from '$lib/journal';
 	import { parseScribeMarkdown } from '$lib/journal-import';
 
@@ -30,6 +31,7 @@ Generated: [TIMESTAMP]
 		errorMessage = '';
 		successMessage = '';
 		isImporting = true;
+		triggerHaptic('medium');
 
 		try {
 			const parsed = parseScribeMarkdown(markdown);
@@ -38,11 +40,13 @@ Generated: [TIMESTAMP]
 			}
 
 			const imported = await importJournalEntries(parsed);
+			triggerHaptic('success');
 			successMessage = `Imported ${imported.length} ${imported.length === 1 ? 'entry' : 'entries'}.`;
 			if (imported[0]) {
 				await goto(`/entry/${imported[0].id}`);
 			}
 		} catch (error) {
+			triggerHaptic('error');
 			errorMessage = error instanceof Error ? error.message : 'Import failed.';
 		} finally {
 			isImporting = false;
@@ -53,6 +57,7 @@ Generated: [TIMESTAMP]
 		const input = event.currentTarget as HTMLInputElement;
 		const file = input.files?.[0];
 		if (!file) return;
+		triggerHaptic('light');
 		markdown = await file.text();
 		errorMessage = '';
 		successMessage = '';

@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { getMoodEmoji, getMoodLabel } from '$lib/entries';
+	import { triggerHaptic } from '$lib/haptics';
 
 	let { value = $bindable(7) }: { value: number } = $props();
 
 	let track: HTMLDivElement | undefined = $state();
 	let dragging = $state(false);
+	let lastHapticValue = $state(value);
 
 	const moods = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
@@ -28,7 +30,14 @@
 		if (!track) return;
 		const rect = track.getBoundingClientRect();
 		const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-		value = Math.round(ratio * 9 + 1);
+		const nextValue = Math.round(ratio * 9 + 1);
+		if (nextValue !== value) {
+			value = nextValue;
+			if (nextValue !== lastHapticValue) {
+				triggerHaptic('selection');
+				lastHapticValue = nextValue;
+			}
+		}
 	}
 
 	function onPointerDown(e: PointerEvent) {
@@ -44,6 +53,7 @@
 
 	function onPointerUp() {
 		dragging = false;
+		lastHapticValue = value;
 	}
 
 	const thumbPercent = $derived(((value - 1) / 9) * 100);

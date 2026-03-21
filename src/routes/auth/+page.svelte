@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { authClient } from '$lib/auth-client';
+	import { triggerHaptic } from '$lib/haptics';
 	import { setJournalUser } from '$lib/journal';
 
 	let mode = $state<'signin' | 'signup'>('signin');
@@ -20,6 +21,7 @@
 	async function submit() {
 		resetError();
 		isSubmitting = true;
+		triggerHaptic('medium');
 
 		const response =
 			mode === 'signup'
@@ -36,10 +38,12 @@
 		isSubmitting = false;
 
 		if (response.error) {
+			triggerHaptic('error');
 			errorMessage = response.error.message || 'Authentication failed.';
 			return;
 		}
 
+		triggerHaptic('success');
 		await setJournalUser(response.data?.user?.id ?? null);
 		await goto(nextUrl, { invalidateAll: true });
 	}
@@ -111,6 +115,7 @@
 			class="switch"
 			type="button"
 			onclick={() => {
+				triggerHaptic('selection');
 				mode = mode === 'signin' ? 'signup' : 'signin';
 				resetError();
 			}}
