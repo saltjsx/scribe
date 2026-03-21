@@ -190,7 +190,7 @@ export default function Sidebar() {
                 }}
               >
                 <UserButton.MenuItems>
-                  <UserButton.MenuAction
+                  <UserButton.Action
                     label="Export all entries as Markdown"
                     labelIcon={<span aria-hidden>⬇️</span>}
                     onClick={exportAllEntriesAsMarkdown}
