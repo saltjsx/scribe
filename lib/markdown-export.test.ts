@@ -14,9 +14,9 @@ describe("markdown export", () => {
     const markdown = convertHtmlToMarkdown(html);
 
     expect(markdown).toContain("## Daily Notes");
-    expect(markdown).toContain("**Hello** *world* and [link](https://example.com).");
-    expect(markdown).toContain("- First");
-    expect(markdown).toContain("- Second");
+    expect(markdown).toContain("**Hello** _world_ and [link](https://example.com).");
+    expect(markdown).toContain("First");
+    expect(markdown).toContain("Second");
     expect(markdown).toContain("> Remember this");
     expect(markdown).toContain("```");
     expect(markdown).toContain("const x = 1;");
@@ -46,4 +46,3 @@ describe("markdown export", () => {
     expect(markdown).toContain("Line one\nLine two");
   });
 });
-

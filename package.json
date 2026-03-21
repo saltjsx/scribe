@@ -19,11 +19,13 @@
     "@tiptap/pm": "^3.20.2",
     "@tiptap/react": "^3.20.2",
     "@tiptap/starter-kit": "^3.20.2",
+    "@types/turndown": "^5.0.6",
     "idb": "^8.0.3",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "recharts": "^3.8.0",
+    "turndown": "^7.2.2",
     "web-haptics": "^0.0.6"
   },
   "devDependencies": {
