@@ -9,6 +9,7 @@ import { useWebHaptics } from "web-haptics/react";
 import { useTheme } from "@/lib/theme-context";
 import { useEntries } from "@/lib/entries-context";
 import { moodLabel } from "@/lib/entries";
+import { buildAllEntriesMarkdown } from "@/lib/markdown-export";
 import Logo from "./logo";
 
 function moodDot(score: number): string {
@@ -44,6 +45,20 @@ export default function Sidebar() {
   const haptic = useWebHaptics();
   const { theme, setTheme } = useTheme();
   const [query, setQuery] = useState("");
+
+  const exportAllEntriesAsMarkdown = () => {
+    const markdown = buildAllEntriesMarkdown(entries);
+    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const timestamp = new Date().toISOString().slice(0, 10);
+    link.href = url;
+    link.download = `scribe-export-${timestamp}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
 
   const filteredEntries = useMemo(() => {
     if (!query.trim()) return entries;
@@ -173,7 +188,15 @@ export default function Sidebar() {
                     avatarBox: "!h-[22px] !w-[22px]",
                   },
                 }}
-              />
+              >
+                <UserButton.MenuItems>
+                  <UserButton.MenuAction
+                    label="Export all files as Markdown"
+                    labelIcon={<span aria-hidden>⬇️</span>}
+                    onClick={exportAllEntriesAsMarkdown}
+                  />
+                </UserButton.MenuItems>
+              </UserButton>
             ) : (
               <Link
                 href="/sign-in"
