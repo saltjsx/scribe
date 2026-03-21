@@ -54,9 +54,16 @@ export const syncStatus = writable<SyncStatus>({
 let dbPromise: Promise<IDBDatabase> | null = null;
 let currentUserId: string | null = null;
 let loadPromise: Promise<Entry[]> | null = null;
+let loadContext: { userId: string; version: number } | null = null;
 let syncPromise: Promise<void> | null = null;
+let syncContext: { userId: string; version: number } | null = null;
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 let onlineListenerBound = false;
+let activeUserVersion = 0;
+
+function isActiveUserContext(userId: string, version: number): boolean {
+	return currentUserId === userId && activeUserVersion === version;
+}
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
 	return new Promise((resolve, reject) => {
@@ -207,14 +214,23 @@ async function getPendingRecords(userId: string): Promise<StoredEntryRecord[]> {
 	return records.filter((record) => record.pendingSync);
 }
 
-async function publishUserEntries(userId: string): Promise<Entry[]> {
+async function publishUserEntries(userId: string, version = activeUserVersion): Promise<Entry[]> {
 	const records = await getEntriesForUser(userId);
 	const entries = sortEntriesByDate(records.filter((record) => !record.deleted).map(toEntry));
+
+	if (!isActiveUserContext(userId, version)) {
+		return entries;
+	}
+
 	journalEntries.set(entries);
 	return entries;
 }
 
-async function refreshSyncStatus(userId: string, overrides: Partial<SyncStatus> = {}): Promise<void> {
+async function refreshSyncStatus(
+	userId: string,
+	overrides: Partial<SyncStatus> = {},
+	version = activeUserVersion
+): Promise<void> {
 	const records = await getEntriesForUser(userId);
 	const pendingCount = records.filter((record) => record.pendingSync).length;
 	const lastSyncedAt =
@@ -223,6 +239,10 @@ async function refreshSyncStatus(userId: string, overrides: Partial<SyncStatus> 
 			.map((record) => record.lastSyncedAt as string)
 			.sort()
 			.at(-1) ?? null;
+
+	if (!isActiveUserContext(userId, version)) {
+		return;
+	}
 
 	syncStatus.update((current) => ({
 		phase: current.phase,
@@ -236,12 +256,18 @@ async function refreshSyncStatus(userId: string, overrides: Partial<SyncStatus> 
 function scheduleSync(delayMs = 0): void {
 	if (!browser || !currentUserId) return;
 
+	const scheduledUserId = currentUserId;
+	const scheduledVersion = activeUserVersion;
+
 	if (syncTimer) {
 		clearTimeout(syncTimer);
 	}
 
 	syncTimer = setTimeout(() => {
 		syncTimer = null;
+		if (!isActiveUserContext(scheduledUserId, scheduledVersion)) {
+			return;
+		}
 		void runSyncCycle();
 	}, delayMs);
 }
@@ -256,6 +282,16 @@ function bindOnlineListener(): void {
 			error: null
 		}));
 		scheduleSync(0);
+	});
+
+	window.addEventListener('focus', () => {
+		scheduleSync(0);
+	});
+
+	document.addEventListener('visibilitychange', () => {
+		if (document.visibilityState === 'visible') {
+			scheduleSync(0);
+		}
 	});
 
 	window.addEventListener('offline', () => {
@@ -345,34 +381,47 @@ async function pullRemoteChanges(userId: string): Promise<void> {
 
 async function runSyncCycle(): Promise<void> {
 	if (!browser || !currentUserId) return;
+	const userId = currentUserId;
+	const version = activeUserVersion;
+
+	if (!isActiveUserContext(userId, version)) return;
 	if (!navigator.onLine) {
-		await refreshSyncStatus(currentUserId, { phase: 'offline', error: null });
+		await refreshSyncStatus(userId, { phase: 'offline', error: null }, version);
 		return;
 	}
-	if (syncPromise) return syncPromise;
+	if (
+		syncPromise &&
+		syncContext?.userId === userId &&
+		syncContext.version === version
+	) {
+		return syncPromise;
+	}
 
-	const userId = currentUserId;
+	syncContext = { userId, version };
 
 	syncPromise = (async () => {
-		await refreshSyncStatus(userId, { phase: 'syncing', error: null });
+		await refreshSyncStatus(userId, { phase: 'syncing', error: null }, version);
 
 		try {
 			await pushPendingChanges(userId);
 			await pullRemoteChanges(userId);
-			await publishUserEntries(userId);
+			await publishUserEntries(userId, version);
 			await refreshSyncStatus(userId, {
 				phase: 'synced',
 				error: null
-			});
+			}, version);
 		} catch (error) {
 			await refreshSyncStatus(userId, {
 				phase: navigator.onLine ? 'error' : 'offline',
 				error: error instanceof Error ? error.message : 'Sync failed.'
-			});
+			}, version);
 		} finally {
-			syncPromise = null;
-			const pendingCount = get(syncStatus).pendingCount;
-			if (pendingCount > 0 && navigator.onLine) {
+			if (syncContext?.userId === userId && syncContext.version === version) {
+				syncPromise = null;
+				syncContext = null;
+			}
+			const pendingCount = isActiveUserContext(userId, version) ? get(syncStatus).pendingCount : 0;
+			if (isActiveUserContext(userId, version) && pendingCount > 0 && navigator.onLine) {
 				scheduleSync(1500);
 			}
 		}
@@ -417,8 +466,17 @@ export async function setJournalUser(userId: string | null): Promise<void> {
 	if (!browser) return;
 	if (currentUserId === userId && get(journalLoaded)) return;
 
+	activeUserVersion += 1;
 	currentUserId = userId;
 	loadPromise = null;
+	loadContext = null;
+	syncPromise = null;
+	syncContext = null;
+
+	if (syncTimer) {
+		clearTimeout(syncTimer);
+		syncTimer = null;
+	}
 
 	if (!userId) {
 		journalEntries.set([]);
@@ -432,6 +490,15 @@ export async function setJournalUser(userId: string | null): Promise<void> {
 		return;
 	}
 
+	journalEntries.set([]);
+	journalLoaded.set(false);
+	syncStatus.set({
+		phase: 'loading',
+		pendingCount: 0,
+		lastSyncedAt: null,
+		error: null
+	});
+
 	bindOnlineListener();
 	await ensureJournalLoaded();
 	scheduleSync(0);
@@ -443,23 +510,47 @@ export async function ensureJournalLoaded(): Promise<Entry[]> {
 		journalLoaded.set(false);
 		return [];
 	}
-	if (loadPromise) return loadPromise;
+	const userId = currentUserId;
+	const version = activeUserVersion;
+
+	if (
+		loadPromise &&
+		loadContext?.userId === userId &&
+		loadContext.version === version
+	) {
+		return loadPromise;
+	}
+
+	loadContext = { userId, version };
 
 	loadPromise = (async () => {
+		if (!isActiveUserContext(userId, version)) {
+			return [];
+		}
+
 		syncStatus.update((current) => ({
 			...current,
 			phase: 'loading',
 			error: null
 		}));
 
-		const entries = await publishUserEntries(currentUserId as string);
+		const entries = await publishUserEntries(userId, version);
+		if (!isActiveUserContext(userId, version)) {
+			return entries;
+		}
+
 		journalLoaded.set(true);
-		await refreshSyncStatus(currentUserId as string, {
+		await refreshSyncStatus(userId, {
 			phase: navigator.onLine ? 'idle' : 'offline',
 			error: null
-		});
+		}, version);
 		return entries;
-	})();
+		})().finally(() => {
+			if (loadContext?.userId === userId && loadContext.version === version) {
+				loadPromise = null;
+				loadContext = null;
+			}
+		});
 
 	return loadPromise;
 }

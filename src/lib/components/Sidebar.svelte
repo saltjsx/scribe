@@ -13,7 +13,7 @@
 	import { cycleTheme, getTheme } from '$lib/theme.svelte';
 	import { getMoodLabel, getMoodDotColor } from '$lib/entries';
 	import { authClient } from '$lib/auth-client';
-	import { journalEntries, journalLoaded, syncStatus } from '$lib/journal';
+	import { journalEntries, journalLoaded, setJournalUser, syncStatus } from '$lib/journal';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import type { User } from 'better-auth';
@@ -94,10 +94,14 @@
 
 		const { error } = await authClient.signOut();
 
+		if (!error) {
+			await setJournalUser(null);
+		}
+
 		isSigningOut = false;
 
 		if (!error) {
-			await goto('/auth');
+			await goto('/auth', { invalidateAll: true, replaceState: true });
 		}
 	}
 </script>

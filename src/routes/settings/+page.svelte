@@ -12,7 +12,7 @@
 	} from 'phosphor-svelte';
 	import { cycleTheme, getTheme } from '$lib/theme.svelte';
 	import { authClient } from '$lib/auth-client';
-	import { syncStatus } from '$lib/journal';
+	import { setJournalUser, syncStatus } from '$lib/journal';
 	import { goto } from '$app/navigation';
 	import type { User } from 'better-auth';
 
@@ -74,9 +74,12 @@
 	async function signOut() {
 		isSigningOut = true;
 		const { error } = await authClient.signOut();
+		if (!error) {
+			await setJournalUser(null);
+		}
 		isSigningOut = false;
 		if (!error) {
-			await goto('/auth');
+			await goto('/auth', { invalidateAll: true, replaceState: true });
 		}
 	}
 </script>

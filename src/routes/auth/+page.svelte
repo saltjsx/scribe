@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { authClient } from '$lib/auth-client';
+	import { setJournalUser } from '$lib/journal';
 
 	let mode = $state<'signin' | 'signup'>('signin');
 	let name = $state('');
@@ -39,6 +40,7 @@
 			return;
 		}
 
+		await setJournalUser(response.data?.user?.id ?? null);
 		await goto(nextUrl, { invalidateAll: true });
 	}
 </script>
