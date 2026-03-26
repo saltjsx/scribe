@@ -1,6 +1,22 @@
 <script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
 	import { getMoodTimeline } from '$lib/entries';
 	import { journalEntries } from '$lib/journal';
+	import {
+		Chart,
+		LineController,
+		LineElement,
+		PointElement,
+		LinearScale,
+		CategoryScale,
+		Filler,
+		Tooltip
+	} from 'chart.js';
+
+	Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Filler, Tooltip);
+
+	let canvas: HTMLCanvasElement;
+	let chart: Chart | null = null;
 
 	const moodData = $derived(getMoodTimeline($journalEntries));
 
@@ -12,127 +28,147 @@
 		return '#ff3b30';
 	}
 
-	const width = 900;
-	const height = 220;
-	const padX = 8;
-	const padTop = 16;
-	const padBottom = 16;
+	function buildGradientSegments(data: { mood: number }[]): string[] {
+		if (data.length < 2) return [];
+		const colors: string[] = [];
+		for (let i = 0; i < data.length; i++) {
+			colors.push(getMoodColor(data[i].mood));
+		}
+		return colors;
+	}
 
-	const graphWidth = width - padX * 2;
-	const graphHeight = height - padTop - padBottom;
+	function createOrUpdateChart() {
+		if (!canvas || moodData.length < 2) {
+			if (chart) {
+				chart.destroy();
+				chart = null;
+			}
+			return;
+		}
 
-	const timeBounds = $derived.by(() => {
-		const minTime = moodData.length > 0 ? moodData[0].date.getTime() : 0;
-		const maxTime = moodData.length > 0 ? moodData[moodData.length - 1].date.getTime() : 1;
-		return {
-			minTime,
-			maxTime,
-			timeRange: maxTime - minTime || 1
+		const labels = moodData.map((p) =>
+			p.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+		);
+		const values = moodData.map((p) => p.mood);
+		const segmentColors = buildGradientSegments(moodData);
+
+		const style = getComputedStyle(document.documentElement);
+		const accent = style.getPropertyValue('--accent').trim() || '#007aff';
+		const muted = style.getPropertyValue('--muted').trim() || 'rgba(60,60,67,0.55)';
+		const divider = style.getPropertyValue('--divider').trim() || 'rgba(60,60,67,0.1)';
+
+		const config = {
+			type: 'line' as const,
+			data: {
+				labels,
+				datasets: [
+					{
+						data: values,
+						fill: true,
+						backgroundColor: (ctx: { chart: Chart }) => {
+							const gradient = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
+							gradient.addColorStop(0, `${accent}1a`);
+							gradient.addColorStop(1, `${accent}03`);
+							return gradient;
+						},
+						segment: {
+							borderColor: (ctx: { p0DataIndex: number; p1DataIndex: number }) =>
+								segmentColors[ctx.p0DataIndex] || accent
+						},
+						borderWidth: 2.5,
+						pointRadius: 0,
+						pointHitRadius: 12,
+						pointHoverRadius: 4,
+						pointHoverBackgroundColor: accent,
+						pointHoverBorderColor: '#fff',
+						pointHoverBorderWidth: 2,
+						tension: 0.35
+					}
+				]
+			},
+			options: {
+				responsive: true,
+				maintainAspectRatio: false,
+				interaction: {
+					mode: 'index' as const,
+					intersect: false
+				},
+				plugins: {
+					tooltip: {
+						backgroundColor: 'rgba(0,0,0,0.72)',
+						titleFont: { size: 12, weight: 'bold' as const },
+						bodyFont: { size: 13 },
+						padding: 10,
+						cornerRadius: 10,
+						displayColors: false,
+						callbacks: {
+							label: (ctx: { parsed: { y: number | null } }) => {
+								const mood = ctx.parsed.y ?? 0;
+								const label =
+									mood >= 9
+										? 'Wonderful'
+										: mood >= 7
+											? 'Good'
+											: mood >= 5
+												? 'Okay'
+												: mood >= 3
+													? 'Low'
+													: 'Rough';
+								return `${mood}/10 — ${label}`;
+							}
+						}
+					}
+				},
+				scales: {
+					x: {
+						display: false
+					},
+					y: {
+						min: 1,
+						max: 10,
+						display: false
+					}
+				},
+				layout: {
+					padding: { top: 8, bottom: 8, left: 4, right: 4 }
+				}
+			}
 		};
+
+		if (chart) {
+			chart.data = config.data;
+			chart.options = config.options;
+			chart.update('none');
+		} else {
+			chart = new Chart(canvas, config);
+		}
+	}
+
+	onMount(() => {
+		createOrUpdateChart();
 	});
 
-	function toX(date: Date): number {
-		return padX + ((date.getTime() - timeBounds.minTime) / timeBounds.timeRange) * graphWidth;
-	}
-
-	function toY(mood: number): number {
-		return padTop + graphHeight - ((mood - 1) / 9) * graphHeight;
-	}
-
-	interface Segment {
-		path: string;
-		color1: string;
-		color2: string;
-		gradId: string;
-	}
-
-	function buildSegments(): Segment[] {
-		if (moodData.length < 2) return [];
-		const points = moodData.map((p) => ({ x: toX(p.date), y: toY(p.mood), mood: p.mood }));
-		const segments: Segment[] = [];
-
-		for (let i = 0; i < points.length - 1; i++) {
-			const p0 = points[Math.max(0, i - 1)];
-			const p1 = points[i];
-			const p2 = points[i + 1];
-			const p3 = points[Math.min(points.length - 1, i + 2)];
-
-			const tension = 0.35;
-			const cp1x = p1.x + (p2.x - p0.x) * tension;
-			const cp1y = p1.y + (p2.y - p0.y) * tension;
-			const cp2x = p2.x - (p3.x - p1.x) * tension;
-			const cp2y = p2.y - (p3.y - p1.y) * tension;
-
-			const d = `M ${p1.x},${p1.y} C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`;
-
-			segments.push({
-				path: d,
-				color1: getMoodColor(p1.mood),
-				color2: getMoodColor(p2.mood),
-				gradId: `seg-${i}`
-			});
+	onDestroy(() => {
+		if (chart) {
+			chart.destroy();
+			chart = null;
 		}
+	});
 
-		return segments;
-	}
-
-	function buildFullPath(): string {
-		if (moodData.length < 2) return '';
-		const points = moodData.map((p) => ({ x: toX(p.date), y: toY(p.mood) }));
-		let d = `M ${points[0].x},${points[0].y}`;
-
-		for (let i = 0; i < points.length - 1; i++) {
-			const p0 = points[Math.max(0, i - 1)];
-			const p1 = points[i];
-			const p2 = points[i + 1];
-			const p3 = points[Math.min(points.length - 1, i + 2)];
-			const tension = 0.35;
-			const cp1x = p1.x + (p2.x - p0.x) * tension;
-			const cp1y = p1.y + (p2.y - p0.y) * tension;
-			const cp2x = p2.x - (p3.x - p1.x) * tension;
-			const cp2y = p2.y - (p3.y - p1.y) * tension;
-			d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p2.x},${p2.y}`;
+	$effect(() => {
+		// Re-run whenever moodData changes
+		void moodData;
+		if (canvas) {
+			createOrUpdateChart();
 		}
-
-		const last = points[points.length - 1];
-		const first = points[0];
-		return `${d} L ${last.x},${height} L ${first.x},${height} Z`;
-	}
-
-	const segments = buildSegments();
-	const fillPath = buildFullPath();
+	});
 </script>
 
 <div class="mood-graph">
 	{#if moodData.length >= 2}
-		<svg width="100%" viewBox="0 0 {width} {height}" preserveAspectRatio="none" class="mood-svg">
-			<defs>
-				<linearGradient id="moodFillGrad" x1="0" y1="0" x2="0" y2="1">
-					<stop offset="0%" stop-color="var(--accent)" stop-opacity="0.1" />
-					<stop offset="100%" stop-color="var(--accent)" stop-opacity="0.01" />
-				</linearGradient>
-
-				{#each segments as seg}
-					<linearGradient id={seg.gradId} x1="0" y1="0" x2="1" y2="0">
-						<stop offset="0%" stop-color={seg.color1} />
-						<stop offset="100%" stop-color={seg.color2} />
-					</linearGradient>
-				{/each}
-			</defs>
-
-			<path d={fillPath} fill="url(#moodFillGrad)" />
-
-			{#each segments as seg}
-				<path
-					d={seg.path}
-					fill="none"
-					stroke="url(#{seg.gradId})"
-					stroke-width="2.5"
-					stroke-linecap="round"
-					stroke-linejoin="round"
-				/>
-			{/each}
-		</svg>
+		<div class="chart-container">
+			<canvas bind:this={canvas}></canvas>
+		</div>
 	{:else}
 		<div class="empty">Not enough entries to show mood trends.</div>
 	{/if}
@@ -143,8 +179,10 @@
 		width: 100%;
 	}
 
-	.mood-svg {
-		display: block;
+	.chart-container {
+		position: relative;
+		width: 100%;
+		height: 180px;
 	}
 
 	.empty {
