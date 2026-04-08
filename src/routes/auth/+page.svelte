@@ -4,6 +4,7 @@
 	import { authClient } from '$lib/auth-client';
 	import { triggerHaptic } from '$lib/haptics';
 	import { setJournalUser } from '$lib/journal';
+	import { sessionLock } from '$lib/session-lock.svelte';
 
 	let mode = $state<'signin' | 'signup'>('signin');
 	let name = $state('');
@@ -44,75 +45,67 @@
 		}
 
 		triggerHaptic('success');
+		sessionLock.unlock();
 		await setJournalUser(response.data?.user?.id ?? null);
 		await goto(nextUrl, { invalidateAll: true });
 	}
 </script>
 
 <div class="auth-shell">
-	<div class="auth-card">
-		<div class="auth-copy">
-			<p class="eyebrow">Scribe</p>
-			<h1>{mode === 'signin' ? 'Sign in' : 'Create account'}</h1>
-			<p>Simple email and password auth. No verification step.</p>
-		</div>
+	<div class="auth-inner">
+		<h1 class="logo">Scribe</h1>
+		<p class="subtitle">{mode === 'signin' ? 'Welcome back' : 'Create your account'}</p>
 
 		<form
-			class="auth-form"
-			onsubmit={async (event) => {
-				event.preventDefault();
+			class="form"
+			onsubmit={async (e) => {
+				e.preventDefault();
 				await submit();
 			}}
 		>
 			{#if mode === 'signup'}
-				<label class="field">
-					<span>Name</span>
-					<input
-						type="text"
-						bind:value={name}
-						placeholder="Abdul"
-						autocomplete="name"
-						oninput={resetError}
-					/>
-				</label>
+				<input
+					type="text"
+					bind:value={name}
+					placeholder="Name"
+					autocomplete="name"
+					aria-label="Name"
+					oninput={resetError}
+				/>
 			{/if}
 
-			<label class="field">
-				<span>Email</span>
-				<input
-					type="email"
-					bind:value={email}
-					placeholder="you@example.com"
-					autocomplete="email"
-					required
-					oninput={resetError}
-				/>
-			</label>
+			<input
+				type="email"
+				bind:value={email}
+				placeholder="Email"
+				autocomplete="email"
+				aria-label="Email"
+				required
+				oninput={resetError}
+			/>
 
-			<label class="field">
-				<span>Password</span>
-				<input
-					type="password"
-					bind:value={password}
-					placeholder="At least 8 characters"
-					autocomplete={mode === 'signin' ? 'current-password' : 'new-password'}
-					minlength="8"
-					required
-					oninput={resetError}
-				/>
-			</label>
+			<input
+				type="password"
+				bind:value={password}
+				placeholder="Password"
+				autocomplete={mode === 'signin' ? 'current-password' : 'new-password'}
+				aria-label="Password"
+				minlength="8"
+				required
+				oninput={resetError}
+			/>
 
 			{#if errorMessage}
 				<p class="error">{errorMessage}</p>
 			{/if}
 
-			<button class="submit" type="submit" disabled={isSubmitting}>
+			<button type="submit" disabled={isSubmitting}>
 				{isSubmitting ? 'Please wait...' : mode === 'signin' ? 'Sign in' : 'Create account'}
 			</button>
 		</form>
 
 		<button
-			class="switch"
+			class="toggle"
 			type="button"
 			onclick={() => {
 				triggerHaptic('selection');
@@ -120,178 +113,146 @@
 				resetError();
 			}}
 		>
-			{mode === 'signin' ? 'Need an account? Sign up' : 'Already have an account? Sign in'}
+			{mode === 'signin' ? 'Create account' : 'Sign in instead'}
 		</button>
 	</div>
 </div>
 
 <style>
-	:global(body) {
-		min-height: 100vh;
-	}
-
 	.auth-shell {
 		min-height: 100vh;
+		min-height: 100dvh;
 		display: grid;
 		place-items: center;
 		padding: 24px;
-		background:
-			radial-gradient(circle at top, rgba(0, 122, 255, 0.12), transparent 32%),
-			linear-gradient(180deg, #faf8f3 0%, #f4f1ea 100%);
+		background: var(--background);
 	}
 
-	.auth-card {
-		width: min(100%, 420px);
-		padding: 32px;
-		border-radius: 28px;
-		background: rgba(255, 255, 255, 0.8);
-		backdrop-filter: blur(18px);
-		border: 1px solid rgba(15, 23, 42, 0.08);
-		box-shadow: 0 24px 80px rgba(15, 23, 42, 0.12);
+	.auth-inner {
+		width: min(100%, 300px);
+		display: flex;
+		flex-direction: column;
+		align-items: center;
 	}
 
-	.auth-copy {
-		margin-bottom: 24px;
-	}
-
-	.eyebrow {
-		margin: 0 0 10px;
-		font-size: 12px;
-		font-weight: 700;
-		letter-spacing: 0.18em;
-		text-transform: uppercase;
-		color: #2563eb;
-	}
-
-	h1 {
-		margin: 0 0 8px;
+	.logo {
 		font-family: 'Instrument Serif', 'Georgia', serif;
-		font-size: 42px;
+		font-size: 52px;
 		font-weight: 400;
-		letter-spacing: -0.04em;
-		color: #111827;
+		color: var(--foreground);
+		letter-spacing: -0.5px;
+		line-height: 1;
+		margin: 0 0 10px;
+		opacity: 0.85;
 	}
 
-	.auth-copy p:last-child {
-		margin: 0;
-		color: #4b5563;
-		line-height: 1.5;
+	.subtitle {
+		color: var(--muted);
+		font-size: 14px;
+		margin: 0 0 32px;
 	}
 
-	.auth-form {
-		display: grid;
-		gap: 14px;
+	.form {
+		width: 100%;
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
 	}
 
-	.field {
-		display: grid;
-		gap: 7px;
-	}
-
-	.field span {
-		font-size: 13px;
-		font-weight: 600;
-		color: #374151;
-	}
-
-	.field input {
-		height: 46px;
+	.form input {
+		height: 44px;
 		padding: 0 14px;
-		border-radius: 14px;
-		border: 1px solid rgba(15, 23, 42, 0.12);
-		background: rgba(255, 255, 255, 0.92);
+		border-radius: 10px;
+		border: 1px solid var(--divider);
+		background: var(--surface);
+		color: var(--foreground);
 		font: inherit;
-		color: #111827;
+		font-size: 14px;
 		outline: none;
-		transition:
-			border-color 0.15s,
-			box-shadow 0.15s,
-			transform 0.15s;
+		transition: border-color 0.15s;
 	}
 
-	.field input:focus {
-		border-color: #2563eb;
-		box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.14);
-		transform: translateY(-1px);
+	.form input:focus {
+		border-color: var(--accent);
+	}
+
+	.form input::placeholder {
+		color: var(--muted);
+	}
+
+	.form button {
+		height: 44px;
+		margin-top: 4px;
+		border: none;
+		border-radius: 10px;
+		background: var(--accent);
+		color: #fff;
+		font: inherit;
+		font-weight: 600;
+		font-size: 14px;
+		cursor: default;
+		transition: opacity 0.15s;
+	}
+
+	.form button:active {
+		opacity: 0.8;
+	}
+
+	.form button:disabled {
+		opacity: 0.5;
 	}
 
 	.error {
 		margin: 0;
-		padding: 12px 14px;
-		border-radius: 14px;
-		background: rgba(239, 68, 68, 0.08);
-		color: #b91c1c;
+		padding: 10px 14px;
+		border-radius: 10px;
+		background: rgba(255, 59, 48, 0.08);
+		color: #ff3b30;
 		font-size: 13px;
 	}
 
-	.submit {
-		height: 48px;
-		border: none;
-		border-radius: 14px;
-		background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-		color: white;
-		font: inherit;
-		font-weight: 700;
-		cursor: default;
-		box-shadow: 0 14px 32px rgba(37, 99, 235, 0.22);
-		transition:
-			transform 0.15s,
-			box-shadow 0.15s,
-			opacity 0.15s;
+	:root[data-theme='dark'] .error {
+		background: rgba(255, 69, 58, 0.12);
+		color: #ff453a;
 	}
 
-	.submit:hover {
-		transform: translateY(-1px);
-		box-shadow: 0 18px 36px rgba(37, 99, 235, 0.28);
-	}
-
-	.submit:disabled {
-		opacity: 0.7;
-	}
-
-	.switch {
-		margin-top: 16px;
+	.toggle {
+		margin-top: 24px;
 		padding: 0;
 		border: none;
-		background: transparent;
-		color: #1d4ed8;
+		background: none;
+		color: var(--muted);
 		font: inherit;
-		font-size: 14px;
-		font-weight: 600;
+		font-size: 13px;
 		cursor: default;
+		transition: color 0.15s;
 	}
 
-	/* Mobile */
+	.toggle:hover {
+		color: var(--foreground);
+	}
+
 	@media (max-width: 768px) {
 		.auth-shell {
 			padding: 20px;
-			padding-top: calc(20px + env(safe-area-inset-top, 0px));
+			padding-top: max(80px, env(safe-area-inset-top, 0px));
 			align-items: start;
-			padding-top: max(60px, env(safe-area-inset-top, 0px));
 		}
 
-		.auth-card {
-			padding: 28px 24px;
-			border-radius: 24px;
+		.auth-inner {
+			width: 100%;
+			max-width: 340px;
+			margin: 0 auto;
 		}
 
-		h1 {
-			font-size: 36px;
-		}
-
-		.field input {
+		.form input {
 			height: 50px;
 			font-size: 16px;
 		}
 
-		.submit {
-			height: 52px;
+		.form button {
+			height: 50px;
 			font-size: 16px;
-		}
-
-		.switch {
-			font-size: 15px;
-			padding: 8px 0;
 		}
 	}
 </style>
