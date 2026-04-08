@@ -7,6 +7,7 @@
 	import MobileNav from '$lib/components/MobileNav.svelte';
 	import { setJournalUser } from '$lib/journal';
 	import { initTheme } from '$lib/theme.svelte';
+	import { sessionLock } from '$lib/session-lock.svelte';
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 
@@ -19,6 +20,16 @@
 
 	onMount(() => {
 		initTheme();
+
+		function handleVisibilityChange() {
+			if (document.visibilityState === 'hidden') {
+				sessionLock.lock();
+				authClient.signOut();
+			}
+		}
+
+		document.addEventListener('visibilitychange', handleVisibilityChange);
+		return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
 	});
 
 	$effect(() => {
@@ -30,12 +41,12 @@
 
 		const next = `${page.url.pathname}${page.url.search}`;
 
-		if (!user && !isAuthPage) {
+		if ((!user || sessionLock.locked) && !isAuthPage) {
 			void goto(`/auth?next=${encodeURIComponent(next)}`, { replaceState: true });
 			return;
 		}
 
-		if (user && isAuthPage) {
+		if (user && !sessionLock.locked && isAuthPage) {
 			const redirectTo = page.url.searchParams.get('next') || '/';
 			void goto(redirectTo, { replaceState: true });
 		}
